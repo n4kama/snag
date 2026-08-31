@@ -1,0 +1,78 @@
+# Snag
+
+Search [7TV](https://7tv.app) emotes and copy them straight to your clipboard as
+real image files, not links, so they paste into WhatsApp, Discord, Signal or
+anything else, even apps with no 7TV integration.
+
+Built for iOS: add it to your Home Screen and it behaves like a native app.
+
+**Live:** <https://snag.nakama.mov>
+
+## Why
+
+7TV's own site is built for desktop chat. On a phone, getting an emote into a
+conversation means long-pressing an image, saving to Photos, then attaching it.
+Snag is a search box and a grid: tap an emote, it's on your clipboard.
+
+## How it works
+
+One HTML file. No backend, no build step, no dependencies, no tracking.
+
+It talks to the public 7TV GraphQL API directly from the browser — both
+`7tv.io` and `cdn.7tv.app` send permissive CORS headers, so no proxy is needed.
+
+Emotes are copied via the async Clipboard API as a real `image/png` blob. 7TV
+serves static emotes as PNG already; animated ones are only available as
+gif/webp/avif, so a PNG copy is rendered from the first frame through a canvas.
+
+## Formats and the animation caveat
+
+| Setting            | Static emote      | Animated emote        |
+| ------------------ | ----------------- | --------------------- |
+| **Auto** (default) | real PNG          | PNG of frame 1        |
+| **PNG**            | real PNG          | PNG of frame 1        |
+| **GIF**            | falls back to PNG | share sheet, animated |
+
+**A web page cannot put an animated GIF on the system clipboard.** The Clipboard
+API spec only permits `text/plain`, `text/html` and `image/png` to be written,
+and WebKit rejects `image/gif` outright. The `web image/gif` custom format exists
+but native apps cannot read it, so it is useless for pasting into a chat app.
+
+The workaround is the share sheet, which hands a real `File` to the OS and skips
+the pasteboard entirely. In GIF mode, tapping an emote opens it directly; the ↗
+button on animated tiles does the same from any mode. The app detects the
+clipboard refusal once, remembers it, and routes around it from then on.
+
+Size (1x–4x) and format are togglable and persist locally. 2x is the default —
+4x is noticeably heavier (GIGACHAD is 83 KB at 1x and 1.2 MB at 4x).
+
+## Development
+
+It is one static file. Open it over HTTP:
+
+```sh
+python3 -m http.server -d public 8000
+```
+
+Then visit <http://localhost:8000>. **HTTPS or localhost is mandatory** — the
+Clipboard API refuses to run on an insecure origin, so opening `index.html` as a
+`file://` URL will not work, and neither will a plain-http LAN address.
+
+Append `#selftest` to the URL to run the built-in checks: it asserts the
+webp→PNG converter emits valid PNG magic bytes, verifies the format-selection
+logic, and prints what this device's clipboard actually supports.
+
+## Deployment
+
+Pushing to `master` publishes `public/` to GitHub Pages via
+[`.github/workflows/pages.yaml`](.github/workflows/pages.yaml). No API tokens or
+secrets are involved — the workflow authenticates with its own OIDC identity.
+
+Repository settings must have **Pages → Source → GitHub Actions** selected.
+
+The custom domain lives in [`public/CNAME`](public/CNAME) so that it survives
+each deploy, rather than only in the repository settings.
+
+## Licence
+
+MIT
