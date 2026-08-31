@@ -1,0 +1,268 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Snag">
+<meta name="theme-color" content="#0e0e10">
+<title>Snag</title>
+<style>
+  :root { --bg:#0e0e10; --card:#18181b; --fg:#efeff1; --dim:#8b8b93; --accent:#29d8f8; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body {
+    margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  header { position:sticky; top:0; z-index:2; background:var(--bg); padding:12px 12px 8px; }
+  #q {
+    width:100%; padding:14px 16px; font-size:17px; border:0; border-radius:12px;
+    background:var(--card); color:var(--fg); outline:2px solid transparent;
+  }
+  #q:focus { outline-color:var(--accent); }
+  .seg { display:flex; gap:4px; margin-top:8px; align-items:center; }
+  .seg b { font-size:11px; color:var(--dim); font-weight:600; margin-right:2px; }
+  .seg button {
+    flex:1; padding:7px 0; font-size:12px; font-weight:600; border:0; border-radius:8px;
+    background:var(--card); color:var(--dim);
+  }
+  .seg button[aria-pressed=true] { background:var(--accent); color:#000; }
+  #status { padding:0 4px; font-size:13px; color:var(--dim); min-height:18px; margin-top:8px; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px; padding:0 12px 24px; }
+  .tile {
+    background:var(--card); border-radius:12px; padding:8px 6px; text-align:center;
+    -webkit-touch-callout:none; user-select:none; cursor:pointer; position:relative;
+    transition:transform .1s, background .15s;
+  }
+  .tile:active { transform:scale(.94); }
+  .tile.ok { background:#14532d; }
+  .tile.err { background:#5b1a1a; }
+  .tile img { width:64px; height:64px; object-fit:contain; display:block; margin:0 auto; pointer-events:none; }
+  .tile .n {
+    font-size:11px; color:var(--dim); margin-top:6px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .share {
+    position:absolute; top:2px; right:2px; width:30px; height:30px; line-height:30px;
+    font-size:15px; border-radius:9px; background:#000a; color:var(--fg); border:0;
+  }
+  #toast {
+    position:fixed; left:50%; transform:translateX(-50%); bottom:calc(28px + env(safe-area-inset-bottom));
+    background:var(--accent); color:#000; font-weight:600; padding:11px 20px; border-radius:999px;
+    max-width:88vw; opacity:0; transition:opacity .2s; pointer-events:none; z-index:5;
+  }
+  #toast.show { opacity:1; }
+  #toast.bad { background:#f87171; }
+</style>
+
+<header>
+  <input id="q" type="search" placeholder="Search emotes…" autocomplete="off" autocorrect="off" autocapitalize="off" enterkeyhint="search">
+  <div class="seg" id="sizes"><b>SIZE</b></div>
+  <div class="seg" id="fmts"><b>COPY</b></div>
+  <div id="status">Trending</div>
+</header>
+<div id="grid"></div>
+<div id="toast"></div>
+
+<script>
+const CDN = 'https://cdn.7tv.app/emote/';
+const SIZES = ['1x', '2x', '3x', '4x'];
+const FMTS = [['auto', 'Auto'], ['png', 'PNG'], ['gif', 'GIF']];
+
+// Safari only *guarantees* image/png on the pasteboard. image/gif is attempted anyway —
+// supports() tells us up front on browsers that implement it, otherwise we find out on write.
+// The Clipboard API spec only allows text/plain, text/html and image/png to be written;
+// WebKit rejects image/gif outright. supports() answers up front where implemented, otherwise
+// we learn from the first failed write and remember it.
+let gifClip = localStorage.gifClip ? localStorage.gifClip === 'true' : null;   // null = unknown
+if (gifClip === null && typeof ClipboardItem !== 'undefined' && ClipboardItem.supports)
+  gifClip = ClipboardItem.supports('image/gif');
+const learnGif = ok => { gifClip = ok; localStorage.gifClip = ok; };
+
+let size = localStorage.size || '2x';
+let fmt = localStorage.fmt || 'auto';
+
+const $ = id => document.getElementById(id);
+const $q = $('q'), $grid = $('grid'), $status = $('status'), $toast = $('toast');
+const gifCache = new Map();
+let seq = 0;
+
+const canShareFiles = !!(navigator.canShare &&
+  navigator.canShare({ files: [new File([], 'a.gif', { type: 'image/gif' })] }));
+
+function toast(msg, bad) {
+  $toast.textContent = msg;
+  $toast.classList.toggle('bad', !!bad);
+  $toast.classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => $toast.classList.remove('show'), bad ? 3200 : 1500);
+}
+
+function segment(el, opts, get, set) {
+  el.querySelectorAll('button').forEach(b => b.remove());
+  for (const [val, label] of opts) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.setAttribute('aria-pressed', get() === val);
+    b.onclick = () => { set(val); segment(el, opts, get, set); };
+    el.append(b);
+  }
+}
+const drawSegs = () => {
+  segment($('sizes'), SIZES.map(s => [s, s]), () => size, v => { localStorage.size = size = v; });
+  segment($('fmts'), FMTS, () => fmt, v => { localStorage.fmt = fmt = v; });
+};
+
+// Animated emotes ship gif+webp+avif and no png; static ship png+webp+avif and no gif.
+// So resolve against the file list the API actually returned, never a guessed URL.
+function pick(e, force) {
+  const order = [size, ...SIZES.filter(s => s !== size)];          // preferred size, then fall back
+  const near = ext => order.map(s => s + '.' + ext).find(n => e.files.includes(n));
+  const want = force || (fmt === 'auto' ? (e.animated && gifClip !== false ? 'gif' : 'png') : fmt);
+
+  if (want === 'gif') {
+    const g = near('gif');
+    if (g) return { url: CDN + e.id + '/' + g, type: 'image/gif' };
+  }
+  const p = near('png');                                          // static emotes: real PNG, no canvas
+  if (p) return { url: CDN + e.id + '/' + p, type: 'image/png' };
+  return { url: CDN + e.id + '/' + near('webp'), type: 'image/png', convert: true };
+}
+
+const grab = url => fetch(url).then(r => {
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.blob();
+});
+
+// Animated -> PNG only. Blob URL keeps the canvas untainted; animation collapses to frame 1.
+async function toPng(url) {
+  const img = new Image();
+  img.src = URL.createObjectURL(await grab(url));
+  try {
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    c.getContext('2d').drawImage(img, 0, 0);
+    return await new Promise(r => c.toBlob(r, 'image/png'));
+  } finally {
+    URL.revokeObjectURL(img.src);
+  }
+}
+
+// Safari revokes clipboard permission if you await before write(), so hand ClipboardItem the
+// unresolved promise and let it settle inside the gesture.
+function copy(e, tile) {
+  // Explicit GIF means "I want the animation" — if the pasteboard won't take it, the share
+  // sheet is the only path that delivers a real animated file, so go there directly.
+  if (fmt === 'gif' && e.animated && gifClip === false) return shareGif(e);
+  const { url, type, convert } = pick(e);
+  const flash = (cls, msg, bad) => {
+    tile.classList.add(cls);
+    setTimeout(() => tile.classList.remove(cls), 700);
+    toast(msg, bad);
+  };
+  try {
+    navigator.clipboard.write([new ClipboardItem({ [type]: convert ? toPng(url) : grab(url) })])
+      .then(() => {
+        if (type === 'image/gif') learnGif(true);
+        flash('ok', 'Copied ' + type.slice(6).toUpperCase() + ' ' + size + ' ✓');
+      }, err => onFail(e, tile, type, err, flash));
+  } catch (err) {
+    onFail(e, tile, type, err, flash);
+  }
+}
+
+// A refused GIF write is not an error the user should have to act on — remember it, then do
+// the best remaining thing automatically: share sheet if they asked for GIF, PNG if Auto.
+function onFail(e, tile, type, err, flash) {
+  if (type !== 'image/gif') return flash('err', 'Copy failed: ' + err.message, true);
+  learnGif(false);
+  if (fmt === 'gif') { toast('Clipboard refuses GIF — opening share…'); return shareGif(e); }
+  // Auto: gifClip is false from here on, so the next tap resolves to PNG inside a live gesture.
+  // Retrying now would not — Safari has already voided the permission for this one.
+  flash('err', 'Clipboard refuses GIF — Auto uses PNG now, tap again', true);
+}
+
+// ponytail: iOS sometimes voids the gesture across the GIF fetch. Cache it so a second tap
+// fires instantly inside a fresh gesture. Drop this if Safari stops being picky.
+async function shareGif(e) {
+  const hit = gifCache.get(e.id);
+  if (hit) return navigator.share({ files: [hit] }).catch(() => {});
+  toast('Fetching GIF…');
+  const file = new File([await grab(pick(e, 'gif').url)], e.name + '.gif', { type: 'image/gif' });
+  gifCache.set(e.id, file);
+  try {
+    await navigator.share({ files: [file] });
+  } catch (err) {
+    if (err.name === 'NotAllowedError') toast('Ready — tap ↗ again');
+  }
+}
+
+function render(items) {
+  $grid.replaceChildren(...items.map(e => {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.innerHTML = '<img loading="lazy" src="' + CDN + e.id + '/2x.webp" alt=""><div class="n"></div>';
+    tile.querySelector('.n').textContent = e.name;
+    tile.onclick = () => copy(e, tile);
+    if (canShareFiles && e.animated) {
+      const b = document.createElement('button');
+      b.className = 'share';
+      b.textContent = '↗';
+      b.title = 'Share animated GIF';
+      b.onclick = ev => { ev.stopPropagation(); shareGif(e); };
+      tile.append(b);
+    }
+    return tile;
+  }));
+}
+
+async function search(query) {
+  const mine = ++seq;
+  $status.textContent = query ? 'Searching…' : 'Trending';
+  const body = {
+    query: 'query($q:String!,$f:EmoteSearchFilter){emotes(query:$q,page:1,limit:60,filter:$f,sort:{value:"popularity",order:DESCENDING}){count items{id name animated host{files{name}}}}}',
+    variables: { q: query, f: { category: 'TOP', exact_match: false, case_sensitive: false, ignore_tags: false, zero_width: false, animated: false, aspect_ratio: '' } }
+  };
+  try {
+    const r = await fetch('https://7tv.io/v3/gql', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+    }).then(r => r.json());
+    if (mine !== seq) return;                       // a newer keystroke already won
+    const d = r.data && r.data.emotes;
+    if (!d) throw new Error((r.errors && r.errors[0].message) || 'bad response');
+    render(d.items.map(e => ({ ...e, files: e.host.files.map(f => f.name) })));
+    $status.textContent = d.count.toLocaleString() + ' results' + (d.count > 60 ? ' — top 60' : '');
+  } catch (err) {
+    if (mine === seq) $status.textContent = 'Error: ' + err.message;
+  }
+}
+
+let debounce;
+$q.oninput = () => { clearTimeout(debounce); debounce = setTimeout(() => search($q.value.trim()), 250); };
+drawSegs();
+search('');
+
+// #selftest — reports what this actual device can do, and asserts the webp->PNG converter.
+if (location.hash === '#selftest') (async () => {
+  const anim = { id: '01F6MZGCNG000255K4X1K7NTHR', animated: true, files: ['1x.webp', '1x.gif'] };
+  const stat = { id: '01F6NACCD80006SZ7ZW5FMWKWK', animated: false, files: ['1x.webp', '1x.png'] };
+  const png = await toPng(CDN + anim.id + '/1x.webp');
+  const sig = new Uint8Array(await png.slice(0, 8).arrayBuffer());
+  console.assert(png.type === 'image/png', 'blob type', png.type);
+  console.assert([137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => sig[i] === b), 'PNG magic bytes');
+  console.assert(png.size > 1000, 'suspiciously small', png.size);
+  const save = [size, fmt];
+  [size, fmt] = ['1x', 'auto'];
+  console.assert(pick(anim).type === 'image/gif', 'auto+animated should be gif');
+  console.assert(pick(stat).type === 'image/png' && !pick(stat).convert, 'static should use real png');
+  fmt = 'png';
+  console.assert(pick(anim).convert === true, 'png+animated must convert from webp');
+  fmt = 'gif';
+  console.assert(pick(stat).type === 'image/png', 'gif+static must fall back to png');
+  [size, fmt] = save;
+  $status.textContent = 'selftest OK · converter ' + png.size + 'B · clipboard GIF: ' +
+    (gifClip === null ? 'unknown (will try)' : gifClip) + ' · share files: ' + canShareFiles;
+})();
+</script>
