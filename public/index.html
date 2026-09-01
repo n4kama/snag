@@ -42,6 +42,12 @@
     font-size:11px; color:var(--dim); margin-top:6px;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
+  #more {
+    display:block; width:calc(100% - 24px); margin:0 12px 24px; padding:13px 0;
+    font-size:13px; font-weight:600; border:0; border-radius:12px;
+    background:var(--card); color:var(--fg);
+  }
+  #more[disabled] { color:var(--dim); }
   #toast {
     position:fixed; left:50%; transform:translateX(-50%); bottom:calc(28px + env(safe-area-inset-bottom));
     background:var(--accent); color:#000; font-weight:600; padding:11px 20px; border-radius:999px;
@@ -57,6 +63,7 @@
   <div id="status">Trending</div>
 </header>
 <div id="grid"></div>
+<button id="more" hidden>Load more</button>
 <div id="toast"></div>
 
 <script>
@@ -76,7 +83,7 @@ const learnGif = ok => { gifClip = ok; localStorage.gifClip = ok; };
 let size = localStorage.size || '2x';
 
 const $ = id => document.getElementById(id);
-const $q = $('q'), $grid = $('grid'), $status = $('status'), $toast = $('toast');
+const $q = $('q'), $grid = $('grid'), $status = $('status'), $toast = $('toast'), $more = $('more');
 const gifCache = new Map();
 let seq = 0;
 
@@ -188,23 +195,30 @@ async function shareGif(e) {
   }
 }
 
-function render(items) {
-  $grid.replaceChildren(...items.map(e => {
+function render(items, append) {
+  const tiles = items.map(e => {
     const tile = document.createElement('div');
     tile.className = 'tile';
     tile.innerHTML = '<img loading="lazy" src="' + CDN + e.id + '/2x.webp" alt=""><div class="n"></div>';
     tile.querySelector('.n').textContent = e.name;
     tile.onclick = () => copy(e, tile);
     return tile;
-  }));
+  });
+  append ? $grid.append(...tiles) : $grid.replaceChildren(...tiles);
 }
 
-async function search(query) {
+const PER_PAGE = 60, MAX_PAGE = 100;   // the API rejects page > 100 outright
+let query = '', page = 1, shown = 0;
+
+// more=true appends the next page; otherwise this is a fresh query and we start at page 1.
+async function search(more) {
   const mine = ++seq;
-  $status.textContent = query ? 'Searching…' : 'Trending';
+  const want = more ? page + 1 : 1;
+  $status.textContent = more ? 'Loading more…' : (query ? 'Searching…' : 'Trending');
+  $more.disabled = true;
   const body = {
-    query: 'query($q:String!,$f:EmoteSearchFilter){emotes(query:$q,page:1,limit:60,filter:$f,sort:{value:"popularity",order:DESCENDING}){count items{id name animated host{files{name}}}}}',
-    variables: { q: query, f: { category: 'TOP', exact_match: false, case_sensitive: false, ignore_tags: false, zero_width: false, animated: false, aspect_ratio: '' } }
+    query: 'query($q:String!,$p:Int!,$f:EmoteSearchFilter){emotes(query:$q,page:$p,limit:' + PER_PAGE + ',filter:$f,sort:{value:"popularity",order:DESCENDING}){count items{id name animated host{files{name}}}}}',
+    variables: { q: query, p: want, f: { category: 'TOP', exact_match: false, case_sensitive: false, ignore_tags: false, zero_width: false, animated: false, aspect_ratio: '' } }
   };
   try {
     const r = await fetch('https://7tv.io/v3/gql', {
@@ -213,17 +227,26 @@ async function search(query) {
     if (mine !== seq) return;                       // a newer keystroke already won
     const d = r.data && r.data.emotes;
     if (!d) throw new Error((r.errors && r.errors[0].message) || 'bad response');
-    render(d.items.map(e => ({ ...e, files: e.host.files.map(f => f.name) })));
-    $status.textContent = d.count.toLocaleString() + ' results' + (d.count > 60 ? ' — top 60' : '');
+    page = want;                                    // only on success, so a failed tap can retry
+    shown = (more ? shown : 0) + d.items.length;
+    render(d.items.map(e => ({ ...e, files: e.host.files.map(f => f.name) })), more);
+    $status.textContent = shown.toLocaleString() + ' of ' + d.count.toLocaleString();
+    $more.hidden = shown >= d.count || d.items.length < PER_PAGE || page >= MAX_PAGE;
   } catch (err) {
     if (mine === seq) $status.textContent = 'Error: ' + err.message;
+  } finally {
+    if (mine === seq) $more.disabled = false;
   }
 }
 
 let debounce;
-$q.oninput = () => { clearTimeout(debounce); debounce = setTimeout(() => search($q.value.trim()), 250); };
+$q.oninput = () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(() => { query = $q.value.trim(); search(); }, 250);
+};
+$more.onclick = () => search(true);
 drawSizes();
-search('');
+search();
 
 // #selftest — reports what this actual device can do, and asserts the webp->PNG converter.
 if (location.hash === '#selftest') (async () => {

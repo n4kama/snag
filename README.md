@@ -43,6 +43,10 @@ app detects the refusal once, remembers it, and routes around it from then on.
 A canvas-rendered PNG of frame 1 is the last resort, used only when the emote
 ships no GIF file or the device has neither GIF clipboard nor file sharing.
 
+Results come 60 at a time; **Load more** appends the next page and the status
+line tracks how many of the total you have. The API rejects `page > 100`, so the
+button disappears at 6000 results, or earlier when the results run out.
+
 Size (1x–4x) is togglable and persists locally. 2x is the default — 4x is
 noticeably heavier (GIGACHAD is 83 KB at 1x and 1.2 MB at 4x).
 
