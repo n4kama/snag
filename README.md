@@ -21,17 +21,15 @@ One HTML file. No backend, no build step, no dependencies, no tracking.
 It talks to the public 7TV GraphQL API directly from the browser — both
 `7tv.io` and `cdn.7tv.app` send permissive CORS headers, so no proxy is needed.
 
-Emotes are copied via the async Clipboard API as a real `image/png` blob. 7TV
-serves static emotes as PNG already; animated ones are only available as
-gif/webp/avif, so a PNG copy is rendered from the first frame through a canvas.
+Emotes are copied via the async Clipboard API. 7TV serves static emotes as PNG
+and animated ones as gif/webp/avif, and the app copies whichever the emote
+actually is — GIF for animated, PNG for static.
 
 ## Formats and the animation caveat
 
-| Setting            | Static emote      | Animated emote        |
-| ------------------ | ----------------- | --------------------- |
-| **Auto** (default) | real PNG          | PNG of frame 1        |
-| **PNG**            | real PNG          | PNG of frame 1        |
-| **GIF**            | falls back to PNG | share sheet, animated |
+There is nothing to choose: a static emote copies as a real PNG, an animated one
+copies as a GIF. There is no reason to want frame 1 of an animation, so the app
+never offers it.
 
 **A web page cannot put an animated GIF on the system clipboard.** The Clipboard
 API spec only permits `text/plain`, `text/html` and `image/png` to be written,
@@ -39,12 +37,14 @@ and WebKit rejects `image/gif` outright. The `web image/gif` custom format exist
 but native apps cannot read it, so it is useless for pasting into a chat app.
 
 The workaround is the share sheet, which hands a real `File` to the OS and skips
-the pasteboard entirely. In GIF mode, tapping an emote opens it directly; the ↗
-button on animated tiles does the same from any mode. The app detects the
-clipboard refusal once, remembers it, and routes around it from then on.
+the pasteboard entirely. Where the clipboard refuses GIF, tapping an animated
+emote opens the share sheet instead — no separate button, the tile does it. The
+app detects the refusal once, remembers it, and routes around it from then on.
+A canvas-rendered PNG of frame 1 is the last resort, used only when the emote
+ships no GIF file or the device has neither GIF clipboard nor file sharing.
 
-Size (1x–4x) and format are togglable and persist locally. 2x is the default —
-4x is noticeably heavier (GIGACHAD is 83 KB at 1x and 1.2 MB at 4x).
+Size (1x–4x) is togglable and persists locally. 2x is the default — 4x is
+noticeably heavier (GIGACHAD is 83 KB at 1x and 1.2 MB at 4x).
 
 ## Development
 
