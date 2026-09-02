@@ -21,9 +21,9 @@ Snag is a search box and a grid: tap an emote, it's on your clipboard.
 
 Both hit the public 7TV GraphQL API directly, sort by popularity, page 60 at a
 time, default to 2x, and paste a real image file rather than a link. That is not
-a coincidence they have to maintain: the query and the file choice live once in
-[`public/snag.js`](public/snag.js), which the web app imports over HTTP and the
-extension bundles. They differ only where the platform forces them to, which is
+a coincidence they have to maintain: the query and the file choice are written
+once in [`raycast/src/snag.mjs`](raycast/src/snag.mjs), and `public/snag.js` is
+a copy of it. They differ only where the platform forces them to, which is
 entirely about the clipboard.
 
 ## The web app
@@ -71,9 +71,14 @@ format detection, and no canvas fallback — nothing needs converting, so on the
 rare emote shipping neither GIF nor PNG the webp is pasted as-is.
 
 Format and size selection is not merely identical, it is the same code:
-[`raycast/src/pick.ts`](raycast/src/pick.ts) is four lines re-exporting
-`public/snag.js` with types attached. Paging is identical too, except scrolling
-loads the next 60 instead of a button.
+[`raycast/src/pick.ts`](raycast/src/pick.ts) re-exports `snag.mjs` with types
+attached. Paging is identical too, except scrolling loads the next 60 instead
+of a button.
+
+The shared module is canonical *here* rather than in `public/` because
+publishing to the store copies only this directory — the store build cannot
+reach a file above it. `just sync` refreshes the `public/` copy and `just test`
+refuses to pass while the two differ.
 
 Set it up:
 
@@ -118,8 +123,8 @@ the webp→PNG converter emits valid PNG magic bytes, verifies the
 format-selection logic, and prints what this device's clipboard actually
 supports. The extension's equivalent is `just test`.
 
-Changes to search, sorting, paging, sizes or format selection land in
-`public/snag.js` and therefore hit **both** apps at once — see
+Changes to search, sorting, paging, sizes or format selection are edited in
+`raycast/src/snag.mjs`, then `just sync`. They hit **both** apps at once — see
 [`CLAUDE.md`](CLAUDE.md) before changing either.
 
 ## Deployment

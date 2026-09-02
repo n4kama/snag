@@ -18,7 +18,13 @@ dev: install
 build: install
     cd raycast && npx ray build -e dist
 
+# public/snag.js is a copy of the canonical raycast/src/snag.mjs — the store build cannot
+# reach outside the extension directory, so the extension owns it.
+sync:
+    cp raycast/src/snag.mjs public/snag.js
+
 test: install
+    @cmp -s raycast/src/snag.mjs public/snag.js || { echo "public/snag.js is stale — run 'just sync'"; exit 1; }
     cd raycast && npm test
 
 lint: install

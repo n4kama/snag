@@ -18,15 +18,23 @@ State which of these three it is, and get agreement first:
 3. **Applies to one only** — say why the other is genuinely unaffected.
 
 This matters most for anything touching **search, sorting, paging, size
-selection, or the GIF/PNG rule**. That is the shared contract and it lives in
-one place, `public/snag.js`: the web app imports it over HTTP, the extension
-bundles it through the four-line re-export in `raycast/src/pick.ts`. Editing it
-changes both apps at once, which is the point — and the reason to think about
-both before editing it.
+selection, or the GIF/PNG rule**. That is the shared contract, and it is written
+once in `raycast/src/snag.mjs`. The extension imports it through the re-export
+in `raycast/src/pick.ts`; the web app loads `public/snag.js`, which is a **copy**
+of it.
 
-Keep `public/snag.js` free of anything platform-specific. It is plain ES
-modules with JSDoc types and no imports, because it has to run unbuilt in Safari
-and type-check under the extension's `tsc` at the same time. Clipboard formats,
+**Edit `raycast/src/snag.mjs`, never `public/snag.js`, then run `just sync`.**
+`just test` compares the two and fails while they differ, so drift is caught
+rather than shipped.
+
+The canonical copy lives inside the extension because `ray publish` copies only
+`raycast/` into the Raycast monorepo — a `../../public/…` import builds fine
+locally and then fails the store CI, which is exactly how it broke once already.
+Nothing in `raycast/src/` may import from above `raycast/`.
+
+Keep the module free of anything platform-specific. It is plain ES modules with
+JSDoc types and no imports, because it has to run unbuilt in Safari and
+type-check under the extension's `tsc` at the same time. Clipboard formats,
 canvas conversion, sharing and pasting belong in the callers.
 
 The current deliberate divergence, for reference: the web app fights the
