@@ -4,9 +4,14 @@ Search [7TV](https://7tv.app) emotes and copy them straight to your clipboard as
 real image files, not links, so they paste into WhatsApp, Discord, Signal or
 anything else, even apps with no 7TV integration.
 
-Built for iOS: add it to your Home Screen and it behaves like a native app.
+Two front ends over the same 7TV search:
 
-**Live:** <https://snag.nakama.mov>
+- **[`public/`](public/)** — a web app for iOS and the browser. Add it to your
+  Home Screen and it behaves like a native app. **Live:**
+  <https://snag.nakama.mov>
+- **[`raycast/`](raycast/)** — a Raycast extension for macOS. A hotkey pops the
+  picker over whatever chat you are in, and Enter pastes the emote into the
+  message box.
 
 ## Why
 
@@ -14,18 +19,26 @@ Built for iOS: add it to your Home Screen and it behaves like a native app.
 conversation means long-pressing an image, saving to Photos, then attaching it.
 Snag is a search box and a grid: tap an emote, it's on your clipboard.
 
-## How it works
+Both hit the public 7TV GraphQL API directly, sort by popularity, page 60 at a
+time, default to 2x, and paste a real image file rather than a link. That is not
+a coincidence they have to maintain: the query and the file choice live once in
+[`public/snag.js`](public/snag.js), which the web app imports over HTTP and the
+extension bundles. They differ only where the platform forces them to, which is
+entirely about the clipboard.
 
-One HTML file. No backend, no build step, no dependencies, no tracking.
+## The web app
 
-It talks to the public 7TV GraphQL API directly from the browser — both
+Two static files, `index.html` and the shared `snag.js`. No backend, no build
+step, no dependencies, no tracking.
+
+It talks to the API directly from the browser — both
 `7tv.io` and `cdn.7tv.app` send permissive CORS headers, so no proxy is needed.
 
 Emotes are copied via the async Clipboard API. 7TV serves static emotes as PNG
 and animated ones as gif/webp/avif, and the app copies whichever the emote
 actually is — GIF for animated, PNG for static.
 
-## Formats and the animation caveat
+### Formats and the animation caveat
 
 There is nothing to choose: a static emote copies as a real PNG, an animated one
 copies as a GIF. There is no reason to want frame 1 of an animation, so the app
@@ -50,21 +63,58 @@ button disappears at 6000 results, or earlier when the results run out.
 Size (1x–4x) is togglable and persists locally. 2x is the default — 4x is
 noticeably heavier (GIGACHAD is 83 KB at 1x and 1.2 MB at 4x).
 
-## Development
+## The Raycast extension
 
-It is one static file. Open it over HTTP:
+The whole animation caveat above evaporates on macOS: Raycast pastes a real
+*file*, so an animated emote arrives animated. There is no share sheet, no
+format detection, and no canvas fallback — nothing needs converting, so on the
+rare emote shipping neither GIF nor PNG the webp is pasted as-is.
+
+Format and size selection is not merely identical, it is the same code:
+[`raycast/src/pick.ts`](raycast/src/pick.ts) is four lines re-exporting
+`public/snag.js` with types attached. Paging is identical too, except scrolling
+loads the next 60 instead of a button.
+
+Set it up:
 
 ```sh
-python3 -m http.server -d public 8000
+just dev             # installs into Raycast and rebuilds on every save
 ```
 
-Then visit <http://localhost:8000>. **HTTPS or localhost is mandatory** — the
-Clipboard API refuses to run on an insecure origin, so opening `index.html` as a
-`file://` URL will not work, and neither will a plain-http LAN address.
+Then bind a hotkey to **Snag Emote** in Raycast Settings → Extensions. Enter
+pastes into the frontmost app; ⌘K → *Copy Emote* copies without pasting.
 
-Append `#selftest` to the URL to run the built-in checks: it asserts the
-webp→PNG converter emits valid PNG magic bytes, verifies the format-selection
-logic, and prints what this device's clipboard actually supports.
+Publishing to the Raycast Store: `npm run publish` from `raycast/` builds,
+validates, forks `raycast/extensions` and opens the PR. `ray lint` already
+passes and [`raycast/CHANGELOG.md`](raycast/CHANGELOG.md) is written, so the
+only thing left is screenshots in `raycast/metadata/` — optional for validation,
+but the store listing is bare without them and reviewers tend to ask. Capture
+them with Raycast's own **Window Capture** command while the extension is open,
+which writes the 2000×1250 the store expects.
+
+## Development
+
+```sh
+just                 # list every recipe
+just serve           # the web app on http://localhost:8000
+just dev             # the Raycast extension, watching for changes
+just test            # asserts format and size selection, no test framework
+just build           # type-check and bundle the extension
+just clean           # drop node_modules and build output
+```
+
+**HTTPS or localhost is mandatory for the web app** — the Clipboard API refuses
+to run on an insecure origin, so opening `index.html` as a `file://` URL will
+not work, and neither will a plain-http LAN address.
+
+Append `#selftest` to the URL to run the web app's built-in checks: it asserts
+the webp→PNG converter emits valid PNG magic bytes, verifies the
+format-selection logic, and prints what this device's clipboard actually
+supports. The extension's equivalent is `just test`.
+
+Changes to search, sorting, paging, sizes or format selection land in
+`public/snag.js` and therefore hit **both** apps at once — see
+[`CLAUDE.md`](CLAUDE.md) before changing either.
 
 ## Deployment
 

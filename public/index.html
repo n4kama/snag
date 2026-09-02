@@ -66,9 +66,8 @@
 <button id="more" hidden>Load more</button>
 <div id="toast"></div>
 
-<script>
-const CDN = 'https://cdn.7tv.app/emote/';
-const SIZES = ['1x', '2x', '3x', '4x'];
+<script type="module">
+import { CDN, SIZES, PER_PAGE, MAX_PAGE, pickFile, searchEmotes } from './snag.js';
 
 // Safari only *guarantees* image/png on the pasteboard. image/gif is attempted anyway —
 // supports() tells us up front on browsers that implement it, otherwise we find out on write.
@@ -111,19 +110,11 @@ function segment(el, opts, get, set) {
 const drawSizes = () =>
   segment($('sizes'), SIZES.map(s => [s, s]), () => size, v => { localStorage.size = size = v; });
 
-// Animated emotes ship gif+webp+avif and no png; static ship png+webp+avif and no gif.
-// So resolve against the file list the API actually returned, never a guessed URL.
+// Maps the shared file choice onto what this browser's clipboard will actually accept:
+// a refused GIF means taking the static path, and webp means a canvas conversion.
 function pick(e, force) {
-  const order = [size, ...SIZES.filter(s => s !== size)];          // preferred size, then fall back
-  const near = ext => order.map(s => s + '.' + ext).find(n => e.files.includes(n));
-
-  if (force === 'gif' || (e.animated && gifClip !== false)) {
-    const g = near('gif');
-    if (g) return { url: CDN + e.id + '/' + g, type: 'image/gif' };
-  }
-  const p = near('png');                                          // static emotes: real PNG, no canvas
-  if (p) return { url: CDN + e.id + '/' + p, type: 'image/png' };
-  return { url: CDN + e.id + '/' + near('webp'), type: 'image/png', convert: true };
+  const f = pickFile(e, size, { gif: force === 'gif' || gifClip !== false });
+  return { url: f.url, type: f.ext === 'gif' ? 'image/gif' : 'image/png', convert: f.ext === 'webp' };
 }
 
 const grab = url => fetch(url).then(r => {
@@ -207,7 +198,6 @@ function render(items, append) {
   append ? $grid.append(...tiles) : $grid.replaceChildren(...tiles);
 }
 
-const PER_PAGE = 60, MAX_PAGE = 100;   // the API rejects page > 100 outright
 let query = '', page = 1, shown = 0;
 
 // more=true appends the next page; otherwise this is a fresh query and we start at page 1.
@@ -216,22 +206,14 @@ async function search(more) {
   const want = more ? page + 1 : 1;
   $status.textContent = more ? 'Loading more…' : (query ? 'Searching…' : 'Trending');
   $more.disabled = true;
-  const body = {
-    query: 'query($q:String!,$p:Int!,$f:EmoteSearchFilter){emotes(query:$q,page:$p,limit:' + PER_PAGE + ',filter:$f,sort:{value:"popularity",order:DESCENDING}){count items{id name animated host{files{name}}}}}',
-    variables: { q: query, p: want, f: { category: 'TOP', exact_match: false, case_sensitive: false, ignore_tags: false, zero_width: false, animated: false, aspect_ratio: '' } }
-  };
   try {
-    const r = await fetch('https://7tv.io/v3/gql', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
-    }).then(r => r.json());
+    const { count, items } = await searchEmotes(query, want);
     if (mine !== seq) return;                       // a newer keystroke already won
-    const d = r.data && r.data.emotes;
-    if (!d) throw new Error((r.errors && r.errors[0].message) || 'bad response');
     page = want;                                    // only on success, so a failed tap can retry
-    shown = (more ? shown : 0) + d.items.length;
-    render(d.items.map(e => ({ ...e, files: e.host.files.map(f => f.name) })), more);
-    $status.textContent = shown.toLocaleString() + ' of ' + d.count.toLocaleString();
-    $more.hidden = shown >= d.count || d.items.length < PER_PAGE || page >= MAX_PAGE;
+    shown = (more ? shown : 0) + items.length;
+    render(items, more);
+    $status.textContent = shown.toLocaleString() + ' of ' + count.toLocaleString();
+    $more.hidden = shown >= count || items.length < PER_PAGE || page >= MAX_PAGE;
   } catch (err) {
     if (mine === seq) $status.textContent = 'Error: ' + err.message;
   } finally {
