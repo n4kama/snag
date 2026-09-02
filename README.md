@@ -84,15 +84,21 @@ just dev             # installs into Raycast and rebuilds on every save
 Then bind a hotkey to **Snag Emote** in Raycast Settings → Extensions. Enter
 pastes into the frontmost app; ⌘K → *Copy Emote* copies without pasting.
 
-Publishing to the Raycast Store: `npm run publish` from `raycast/` builds,
-validates, forks `raycast/extensions` and opens the PR. `ray lint` already
-passes and [`raycast/CHANGELOG.md`](raycast/CHANGELOG.md) is written, so the
-only thing left is screenshots in `raycast/metadata/` — optional for validation,
-but the store listing is bare without them and reviewers tend to ask. Capture
-them with Raycast's own **Window Capture** command while the extension is open,
-which writes the 2000×1250 the store expects.
+Publishing to the Raycast Store: `ray login`, then `npm run publish` from
+`raycast/` — it builds, validates, forks `raycast/extensions` and opens the PR.
+`ray lint` passes and [`raycast/CHANGELOG.md`](raycast/CHANGELOG.md) is written.
+
+There is deliberately no `raycast/metadata/` directory. Screenshots are optional
+while it is absent and strictly validated at 2000×1250 the moment it exists, and
+Raycast's **Window Capture** only reaches that on a 2× display — every monitor
+here runs at 1×, so it tops out near 1000×625. Add screenshots from a Retina
+display later rather than shipping an upscale.
 
 ## Development
+
+There is no Raycast CLI to install: `ray` ships inside `@raycast/api`, so
+`npm install` puts it at `raycast/node_modules/.bin/ray` and every recipe below
+uses that copy. Nothing here needs to be installed globally.
 
 ```sh
 just                 # list every recipe
