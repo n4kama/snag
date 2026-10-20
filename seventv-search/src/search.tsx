@@ -33,8 +33,11 @@ import {
 
 import { createSavedEmotesStore } from "./saved-emotes";
 
+const GRID_COLUMNS = { small: 8, medium: 6, large: 4 };
+
 export default function Command() {
-  const defaultSize = Number(getPreferenceValues<Preferences>().size);
+  const preferences = getPreferenceValues<Preferences>();
+  const defaultSize = Number(preferences.size);
   const [searchText, setSearchText] = useState("");
   const [items, setItems] = useState<Emote[]>([]);
   const [favorites, setFavorites] = useState<Emote[]>([]);
@@ -459,7 +462,8 @@ export default function Command() {
             {dropdownSections(Grid.Dropdown)}
           </Grid.Dropdown>
         }
-        columns={6}
+        columns={GRID_COLUMNS[preferences.gridSize]}
+        inset={preferences.gridSize === "small" ? Grid.Inset.Small : undefined}
         fit={Grid.Fit.Contain}
       >
         {!searchText &&
